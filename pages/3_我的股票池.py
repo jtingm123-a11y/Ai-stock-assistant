@@ -89,8 +89,9 @@ elif watchlist.empty:
     st.info("尚未添加自选股。")
 else:
     st.subheader("我的自选股")
-    snapshot = get_watchlist_snapshot()
-    names = _load_stock_names(watchlist["symbol"].tolist())
+    with st.spinner("正在加载我的自选股，请稍等..."):
+        snapshot = get_watchlist_snapshot()
+        names = _load_stock_names(watchlist["symbol"].tolist())
     snapshot["name"] = snapshot["symbol"].map(names).fillna("--")
     cached_count = int(snapshot["trade_date"].notna().sum())
     avg_change = pd.to_numeric(snapshot["change_pct"], errors="coerce").mean()

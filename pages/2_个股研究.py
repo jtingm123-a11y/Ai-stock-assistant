@@ -161,12 +161,12 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
             for date in tick_values
         ]
         chart_fig = make_subplots(
-            rows=2,
+            rows=3,
             cols=1,
             shared_xaxes=True,
             vertical_spacing=0.04,
-            row_heights=[0.72, 0.28],
-            subplot_titles=("K 线与均线", "成交量"),
+            row_heights=[0.58, 0.22, 0.20],
+            subplot_titles=("K 线与均线", "成交量", "MACD"),
         )
         chart_fig.add_trace(
             go.Candlestick(
@@ -215,8 +215,42 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
             row=2,
             col=1,
         )
+        macd_colors = [
+            "#F87171" if value >= 0 else "#34D399"
+            for value in chart_data["macd"].fillna(0)
+        ]
+        chart_fig.add_trace(
+            go.Bar(
+                x=chart_x,
+                y=chart_data["macd"],
+                name="MACD 柱",
+                marker_color=macd_colors,
+            ),
+            row=3,
+            col=1,
+        )
+        chart_fig.add_trace(
+            go.Scatter(
+                x=chart_x,
+                y=chart_data["dif"],
+                name="DIF",
+                line=dict(color="#FBBF24"),
+            ),
+            row=3,
+            col=1,
+        )
+        chart_fig.add_trace(
+            go.Scatter(
+                x=chart_x,
+                y=chart_data["dea"],
+                name="DEA",
+                line=dict(color="#60A5FA"),
+            ),
+            row=3,
+            col=1,
+        )
         chart_fig.update_layout(
-            height=500,
+            height=680,
             template="plotly_dark",
             dragmode="pan",
             hovermode="x unified",
@@ -230,13 +264,13 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
             tickvals=tick_values,
             ticktext=tick_text,
             tickangle=0,
-            rangeslider_visible=True,
-            rangeslider_thickness=0.07,
-            row=2,
+            rangeslider_visible=False,
+            row=3,
             col=1,
         )
         chart_fig.update_yaxes(title_text="价格", fixedrange=False, row=1, col=1)
         chart_fig.update_yaxes(title_text="成交量", fixedrange=False, row=2, col=1)
+        chart_fig.update_yaxes(title_text="MACD", fixedrange=False, row=3, col=1)
         st.plotly_chart(
             chart_fig,
             use_container_width=True,
@@ -247,49 +281,6 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
                 "modeBarButtonsToAdd": ["autoScale2d", "resetScale2d"],
             },
         )
-    with st.container(border=True):
-        macd = go.Figure()
-        macd_colors = [
-            "#F87171" if value >= 0 else "#34D399"
-            for value in data["macd"].fillna(0)
-        ]
-        macd.add_trace(
-            go.Bar(
-                x=data["trade_date"],
-                y=data["macd"],
-                name="MACD 柱",
-                marker_color=macd_colors,
-            )
-        )
-        macd.add_trace(
-            go.Scatter(
-                x=data["trade_date"],
-                y=data["dif"],
-                name="DIF",
-                line=dict(color="#FBBF24"),
-            )
-        )
-        macd.add_trace(
-            go.Scatter(
-                x=data["trade_date"],
-                y=data["dea"],
-                name="DEA",
-                line=dict(color="#60A5FA"),
-            )
-        )
-        macd.update_layout(
-            title="MACD（红色为正、绿色为负）",
-            height=300,
-            margin=dict(l=10, r=10, t=30, b=10),
-            template="plotly_dark",
-            xaxis=dict(
-                title="交易日期",
-                tickformat="%Y年%m月%d日",
-                hoverformat="%Y年%m月%d日",
-            ),
-        )
-        st.plotly_chart(macd, use_container_width=True)
-
     with st.container(border=True):
         st.subheader("研究结论")
         st.write(build_research_summary(score))

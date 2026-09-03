@@ -2,7 +2,6 @@ from textwrap import dedent
 
 import streamlit as st
 
-from src.data_sources.global_markets import fetch_global_market_quotes
 from src.data_sources.market_data import normalize_symbol
 from src.database.repositories import get_local_market_overview
 from src.database.schema import initialize_database
@@ -96,45 +95,3 @@ for column, (label, value, value_class) in zip(st.columns(3, gap="small"), overv
             unsafe_allow_html=True,
         )
 st.caption("综合涨跌 = 股票池中有行情股票的日涨跌幅算术平均值；无行情股票不参与计算。")
-
-if "home_china_quotes" not in st.session_state:
-    with st.spinner("正在获取中国市场行情..."):
-        china_quotes, china_errors = fetch_global_market_quotes()
-    st.session_state["home_china_quotes"] = (
-        china_quotes[
-            china_quotes["市场"].astype(str).str.startswith(("中国", "香港"))
-        ]
-        if "市场" in china_quotes
-        else china_quotes
-    )
-    st.session_state["home_china_errors"] = china_errors
-china_quotes = st.session_state["home_china_quotes"]
-if china_quotes.empty:
-    st.warning("暂时无法获取中国市场行情，请稍后刷新。")
-else:
-    china_display = china_quotes.copy()
-    china_display["市场"] = china_display["市场"].replace(
-        {"中国上证指数": "上证指数", "中国深证成指": "深证成指", "香港恒生指数": "恒生指数"}
-    )
-    china_display["最新"] = china_display["最新"].map(lambda value: f"{value:,.2f}")
-    china_display["涨跌"] = china_display["涨跌"].map(lambda value: f"{value:+,.2f}")
-    china_display["涨跌幅"] = china_display["涨跌幅"].map(lambda value: f"{value:+.2f}%")
-    china_display = china_display[["市场", "代码", "最新", "涨跌", "涨跌幅"]]
-
-    def _color_market_change(value: object) -> str:
-        number = str(value).replace("%", "").replace("+", "").strip()
-        try:
-            change = float(number)
-        except ValueError:
-            return ""
-        if change > 0:
-            return "color: #F87171; font-weight: 700"
-        if change < 0:
-            return "color: #34D399; font-weight: 700"
-        return "color: #F1F5F9; font-weight: 700"
-
-    st.dataframe(
-        china_display.style.map(_color_market_change, subset=["涨跌幅"]),
-        hide_index=True,
-        use_container_width=True,
-    )
