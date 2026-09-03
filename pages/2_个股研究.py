@@ -7,8 +7,35 @@ from src.analysis.scoring import build_research_summary
 from src.analysis.agent_views import build_agent_views
 from src.data_sources.market_data import normalize_symbol
 from src.services.scoring_service import get_stock_score
-from src.services.stock_service import get_analysis
+from src.services.stock_service import get_analysis, get_quote_source
 from src.utils.formatters import format_number
+
+
+def _compact_number(value: object) -> str:
+    number = pd.to_numeric(value, errors="coerce")
+    if pd.isna(number):
+        return "--"
+    absolute = abs(float(number))
+    if absolute >= 100000000:
+        return f"{number / 100000000:.2f}亿"
+    if absolute >= 10000:
+        return f"{number / 10000:.2f}万"
+    return f"{number:,.2f}".rstrip("0").rstrip(".")
+
+
+def _wan_number(value: object) -> str:
+    number = pd.to_numeric(value, errors="coerce")
+    if pd.isna(number):
+        return "--"
+    return f"{float(number) / 10000:,.2f}万"
+
+
+def _color_change(value: object) -> str:
+    number = pd.to_numeric(str(value).replace("%", ""), errors="coerce")
+    if pd.isna(number) or number == 0:
+        return ""
+    return "color: #F87171; font-weight: 700" if number > 0 else "color: #34D399; font-weight: 700"
+
 
 st.title("个股研究")
 st.markdown(
@@ -33,23 +60,35 @@ st.markdown(
     .role-purple .role-title span {color: #A78BFA;}
     .source-badge {display:inline-block; padding:.25rem .6rem; border-radius:999px;
         background:#193452; color:#93C5FD; font-size:.78rem; font-weight:650;}
+    .metric-card {height:102px; box-sizing:border-box; border:1px solid #26364D;
+        border-radius:8px; padding:.75rem 1rem; background:#131E2F;}
+    .metric-label {font-size:.85rem; line-height:1.35; color:#AFC0D4;}
+    .metric-value {font-size:2rem; font-weight:700; line-height:1.2; margin-top:.35rem;}
     </style>""",
     unsafe_allow_html=True,
 )
 with st.form("individual_research_form", border=True):
     input_col, option_col, action_col = st.columns([4, 2, 1], vertical_alignment="bottom")
     with input_col:
-        symbol = st.text_input("股票代码", value=st.session_state.get("symbol", "600519"), max_chars=6, placeholder="例如 600519")
+        symbol = st.text_input("股票代码", value=st.session_state.get("symbol", ""), max_chars=6, placeholder="请输入 6 位 A 股代码")
     with option_col:
         refresh = st.checkbox("立即刷新行情与财务数据", value=True)
     with action_col:
         submitted = st.form_submit_button("开始研究", type="primary", icon=":material/manage_search:")
 
-if submitted:
+retry_requested = st.session_state.pop("research_retry", False)
+auto_research = st.session_state.pop("auto_research", False)
+if submitted or retry_requested or auto_research:
     try:
         with st.spinner("正在计算技术指标..."):
-            symbol = normalize_symbol(symbol)
-            profile, data = get_analysis(symbol, refresh=refresh)
+            symbol = normalize_symbol(
+                st.session_state.get("symbol", "")
+                if retry_requested or auto_research
+                else symbol
+            )
+            profile, data = get_analysis(
+                symbol, refresh=True if auto_research else refresh
+            )
             score, finance, finance_error = get_stock_score(symbol, data)
         st.session_state["symbol"] = symbol
         st.session_state["research_payload"] = {
@@ -63,6 +102,10 @@ if submitted:
             st.info("查询新股票必须联网；网络恢复后重新点击“开始研究”即可。")
         else:
             st.error(message, icon=":material/error:")
+        if st.session_state.get("symbol"):
+            if st.button("重试获取研究数据", key="research_retry_button"):
+                st.session_state["research_retry"] = True
+                st.rerun()
 
 payload = st.session_state.get("research_payload")
 if payload and payload["symbol"] == st.session_state.get("symbol"):
@@ -71,6 +114,181 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
     last = data.iloc[-1]
     st.subheader(f"{profile['name']}（{payload['symbol']}）")
     st.caption(f"{profile['industry']} · 上市日期 {profile['listing_date']} · 行情截至 {str(last['trade_date'])[:10]} · 前复权日线")
+    change_pct = pd.to_numeric(last.get("change_pct"), errors="coerce")
+    change_color = "#F87171" if pd.notna(change_pct) and change_pct >= 0 else "#34D399"
+    st.markdown(
+        f'<span class="source-badge">数据来源：{get_quote_source()}</span>',
+        unsafe_allow_html=True,
+    )
+    market_columns = st.columns(4, gap="small")
+    market_metrics = [
+        ("收盘价", f"{last['close']:.2f}", "#F1F5F9"),
+        ("涨跌幅", "--" if pd.isna(change_pct) else f"{change_pct:+.2f}%", change_color),
+        ("成交量", _wan_number(last.get("volume")), "#F1F5F9"),
+        ("成交额", format_number(last.get("amount")), "#F1F5F9"),
+    ]
+    for column, (label, value, color) in zip(market_columns, market_metrics):
+        with column:
+            st.markdown(
+                f'<div class="metric-card"><div class="metric-label">{label}</div>'
+                f'<div class="metric-value" style="color:{color}">{value}</div></div>',
+                unsafe_allow_html=True,
+            )
+
+    with st.container(border=True):
+        st.subheader("行情 K 线")
+        period = st.radio(
+            "查看范围",
+            ["最近 60 个交易日", "最近 120 个交易日", "全部历史数据"],
+            horizontal=True,
+            key="top_chart_period",
+        )
+        selected_ma = st.multiselect(
+            "均线显示",
+            ["MA5", "MA10", "MA20", "MA60"],
+            default=["MA5", "MA10", "MA20", "MA60"],
+            key="top_chart_selected_ma",
+        )
+        chart_data = data if period == "全部历史数据" else data.tail(
+            60 if period.startswith("最近 60") else 120
+        )
+        chart_x = pd.to_datetime(chart_data["trade_date"])
+        weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+        tick_step = max(1, len(chart_x) // 10)
+        tick_values = chart_x.iloc[::tick_step]
+        tick_text = [
+            f"{date.strftime('%m/%d')} {weekday_names[date.weekday()]}"
+            for date in tick_values
+        ]
+        chart_fig = make_subplots(
+            rows=2,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.04,
+            row_heights=[0.72, 0.28],
+            subplot_titles=("K 线与均线", "成交量"),
+        )
+        chart_fig.add_trace(
+            go.Candlestick(
+                x=chart_x,
+                open=chart_data["open"],
+                high=chart_data["high"],
+                low=chart_data["low"],
+                close=chart_data["close"],
+                name="K 线",
+                increasing_line_color="#F87171",
+                increasing_fillcolor="#F87171",
+                decreasing_line_color="#34D399",
+                decreasing_fillcolor="#34D399",
+            ),
+            row=1,
+            col=1,
+        )
+        for column, name, color in [
+            ("ma5", "MA5", "#FBBF24"),
+            ("ma10", "MA10", "#60A5FA"),
+            ("ma20", "MA20", "#A78BFA"),
+            ("ma60", "MA60", "#22D3EE"),
+        ]:
+            if name not in selected_ma:
+                continue
+            chart_fig.add_trace(
+                go.Scatter(
+                    x=chart_x,
+                    y=chart_data[column],
+                    name=name,
+                    line=dict(color=color),
+                ),
+                row=1,
+                col=1,
+            )
+        chart_fig.add_trace(
+            go.Bar(
+                x=chart_x,
+                y=chart_data["volume"],
+                name="成交量",
+                marker_color=[
+                    "#F87171" if close >= open_price else "#34D399"
+                    for open_price, close in zip(chart_data["open"], chart_data["close"])
+                ],
+            ),
+            row=2,
+            col=1,
+        )
+        chart_fig.update_layout(
+            height=500,
+            template="plotly_dark",
+            dragmode="pan",
+            hovermode="x unified",
+            margin=dict(l=10, r=10, t=45, b=10),
+            xaxis_rangeslider_visible=False,
+        )
+        chart_fig.update_xaxes(
+            type="date",
+            rangebreaks=[dict(bounds=["sat", "mon"])],
+            tickmode="array",
+            tickvals=tick_values,
+            ticktext=tick_text,
+            tickangle=0,
+            rangeslider_visible=True,
+            rangeslider_thickness=0.07,
+            row=2,
+            col=1,
+        )
+        chart_fig.update_yaxes(title_text="价格", fixedrange=False, row=1, col=1)
+        chart_fig.update_yaxes(title_text="成交量", fixedrange=False, row=2, col=1)
+        st.plotly_chart(
+            chart_fig,
+            use_container_width=True,
+            config={
+                "scrollZoom": True,
+                "displaylogo": False,
+                "doubleClick": "reset",
+                "modeBarButtonsToAdd": ["autoScale2d", "resetScale2d"],
+            },
+        )
+    with st.container(border=True):
+        macd = go.Figure()
+        macd_colors = [
+            "#F87171" if value >= 0 else "#34D399"
+            for value in data["macd"].fillna(0)
+        ]
+        macd.add_trace(
+            go.Bar(
+                x=data["trade_date"],
+                y=data["macd"],
+                name="MACD 柱",
+                marker_color=macd_colors,
+            )
+        )
+        macd.add_trace(
+            go.Scatter(
+                x=data["trade_date"],
+                y=data["dif"],
+                name="DIF",
+                line=dict(color="#FBBF24"),
+            )
+        )
+        macd.add_trace(
+            go.Scatter(
+                x=data["trade_date"],
+                y=data["dea"],
+                name="DEA",
+                line=dict(color="#60A5FA"),
+            )
+        )
+        macd.update_layout(
+            title="MACD（红色为正、绿色为负）",
+            height=300,
+            margin=dict(l=10, r=10, t=30, b=10),
+            template="plotly_dark",
+            xaxis=dict(
+                title="交易日期",
+                tickformat="%Y年%m月%d日",
+                hoverformat="%Y年%m月%d日",
+            ),
+        )
+        st.plotly_chart(macd, use_container_width=True)
 
     with st.container(border=True):
         st.subheader("研究结论")
@@ -106,140 +324,27 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
             box.metric(label, f"{format_number(last.get(key))}{suffix}")
         st.caption("评分由技术面、财务面、趋势强度和风险指标组成；仅供研究参考。")
     with technical_tab:
-        period = st.radio(
-            "查看范围",
-            ["最近 60 个交易日", "最近 120 个交易日", "全部历史数据"],
-            horizontal=True,
+        st.subheader("近期交易数据")
+        recent = data.tail(100).sort_values("trade_date", ascending=False).rename(
+            columns={
+                "trade_date": "交易日期", "open": "开盘价", "high": "最高价",
+                "low": "最低价", "close": "收盘价", "volume": "成交量",
+                "amount": "成交额", "turnover": "换手率(%)", "amplitude": "振幅(%)",
+                "change_pct": "涨跌幅(%)", "change_amount": "涨跌额",
+            }
         )
-        chart_data = data if period == "全部历史数据" else data.tail(60 if period.startswith("最近 60") else 120)
-        selected_ma = st.multiselect(
-            "均线显示",
-            ["MA5", "MA10", "MA20", "MA60"],
-            default=["MA5", "MA10", "MA20", "MA60"],
-            key="research_selected_ma",
-        )
-        weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-        chart_dates = pd.to_datetime(chart_data["trade_date"])
-        chart_labels = [
-            f"{date.strftime('%m/%d')} {weekday_names[date.weekday()]}"
-            for date in chart_dates
-        ]
-        chart_x = chart_dates
-        x_padding = pd.Timedelta(days=2)
-        fig = make_subplots(
-            rows=2,
-            cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.04,
-            row_heights=[0.72, 0.28],
-            subplot_titles=("K 线与均线", "成交量"),
-        )
-        fig.add_trace(
-            go.Candlestick(
-                x=chart_x,
-                open=chart_data["open"],
-                high=chart_data["high"],
-                low=chart_data["low"],
-                close=chart_data["close"],
-                name="K 线",
-                increasing_line_color="#F87171",
-                increasing_fillcolor="#F87171",
-                decreasing_line_color="#34D399",
-                decreasing_fillcolor="#34D399",
-            ),
-            row=1,
-            col=1,
-        )
-        for col, name, color in [
-            ("ma5", "MA5", "#FBBF24"),
-            ("ma10", "MA10", "#60A5FA"), ("ma20", "MA20", "#A78BFA"),
-            ("ma60", "MA60", "#22D3EE"),
-        ]:
-            if name not in selected_ma:
-                continue
-            fig.add_trace(
-                go.Scatter(
-                    x=chart_x, y=chart_data[col], name=name,
-                    line=dict(color=color),
-                ),
-                row=1,
-                col=1,
+        for column in ("成交量", "成交额"):
+            if column in recent:
+                recent[column] = recent[column].map(_compact_number)
+        if "涨跌幅(%)" in recent:
+            recent["涨跌幅(%)"] = recent["涨跌幅(%)"].map(
+                lambda value: "--" if pd.isna(value) else f"{value:+.2f}%"
             )
-        volume_colors = [
-            "#F87171" if close >= open_price else "#34D399"
-            for open_price, close in zip(chart_data["open"], chart_data["close"])
-        ]
-        fig.add_trace(
-            go.Bar(
-                x=chart_x,
-                y=chart_data["volume"],
-                name="成交量",
-                marker_color=volume_colors,
-            ),
-            row=2,
-            col=1,
+        st.dataframe(
+            recent.style.map(_color_change, subset=["涨跌幅(%)"]),
+            hide_index=True,
+            use_container_width=True,
         )
-        fig.update_layout(
-            title="K 线与成交量（红涨绿跌）", height=620,
-            margin=dict(l=10, r=10, t=55, b=10), template="plotly_dark", dragmode="pan",
-            xaxis_rangeslider_visible=False,
-            hovermode="x unified",
-            bargap=0.18,
-            uirevision=f"research-{symbol}-{period}",
-        )
-        fig.update_xaxes(
-            title_text="交易日期",
-            type="date",
-            tickangle=0,
-            tickformat="%m/%d",
-            rangebreaks=[dict(bounds=["sat", "mon"])],
-            range=[chart_x.iloc[0] - x_padding, chart_x.iloc[-1] + x_padding],
-            constrain="domain",
-            row=2,
-            col=1,
-        )
-        fig.update_xaxes(
-            fixedrange=False,
-            rangeslider_visible=False,
-            constrain="domain",
-            row=1,
-            col=1,
-        )
-        fig.update_xaxes(rangeslider_visible=True, rangeslider_thickness=0.07, row=2, col=1)
-        fig.update_yaxes(
-            title_text="价格", autorange=True, fixedrange=False,
-            rangemode="normal", constrain="domain", row=1, col=1,
-        )
-        fig.update_yaxes(
-            title_text="成交量", autorange=True, fixedrange=False,
-            rangemode="normal", constrain="domain", row=2, col=1,
-        )
-        with st.container(border=True):
-            st.caption("提示：滚轮缩放，拖动查看；底部滑块可快速选择时间范围，双击图表可复位。")
-            st.plotly_chart(
-                fig,
-                use_container_width=True,
-                config={
-                    "scrollZoom": True,
-                    "displaylogo": False,
-                    "doubleClick": "reset",
-                    "dragmode": "pan",
-                    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-                    "modeBarButtonsToAdd": ["autoScale2d", "resetScale2d"],
-                },
-            )
-        macd = go.Figure()
-        macd_colors = ["#F87171" if value >= 0 else "#34D399" for value in data["macd"].fillna(0)]
-        macd.add_trace(go.Bar(x=data["trade_date"], y=data["macd"], name="MACD 柱", marker_color=macd_colors))
-        macd.add_trace(go.Scatter(x=data["trade_date"], y=data["dif"], name="DIF", line=dict(color="#FBBF24")))
-        macd.add_trace(go.Scatter(x=data["trade_date"], y=data["dea"], name="DEA", line=dict(color="#60A5FA")))
-        macd.update_layout(
-            title="MACD（红色为正、绿色为负）", height=300,
-            margin=dict(l=10, r=10, t=30, b=10), template="plotly_dark",
-            xaxis=dict(title="交易日期", tickformat="%Y年%m月%d日", hoverformat="%Y年%m月%d日"),
-        )
-        with st.container(border=True):
-            st.plotly_chart(macd)
     with financial_tab:
         if finance is not None:
             with st.container(border=True):

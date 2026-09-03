@@ -22,6 +22,10 @@ st.markdown(
     .watchlist-average-card {height: 100%; box-sizing: border-box;}
     .watchlist-average-card {min-height: 102px; display: flex; flex-direction: column;
         justify-content: flex-start;}
+    .watchlist-change-details {font-size:.78rem; line-height:1.35; margin-top:.25rem; white-space:nowrap;}
+    .watchlist-change-details .up {color:#F1F5F9 !important;}
+    .watchlist-change-details .down {color:#F1F5F9 !important;}
+    .watchlist-change-details .flat {color:#F1F5F9 !important;}
     [data-testid="stMetric"] {height: 102px; box-sizing: border-box;
         display: flex; flex-direction: column; justify-content: flex-start;}
     [data-testid="stMetricLabel"] {min-height: 1.35rem;}
@@ -32,6 +36,10 @@ st.markdown(
 )
 st.title("自选股票")
 st.caption("集中管理你正在跟踪的股票，行情数据来自本地缓存和公开数据源。")
+if st.button("查看我的自选股", type="secondary", key="show_watchlist_button"):
+    st.session_state["watchlist_visible"] = True
+    st.rerun()
+
 with st.form("add_watchlist_form", border=True):
     col1, col2, col3 = st.columns([2, 3, 1], vertical_alignment="bottom")
     with col1:
@@ -74,15 +82,21 @@ def _compact_number(value: object) -> str:
 
 
 watchlist = list_watchlist()
-st.subheader("我的自选股")
-if watchlist.empty:
+if not st.session_state.get("watchlist_visible", False):
+    st.caption("添加股票后，点击“查看我的自选股”展示行情和管理内容。")
+elif watchlist.empty:
+    st.subheader("我的自选股")
     st.info("尚未添加自选股。")
 else:
+    st.subheader("我的自选股")
     snapshot = get_watchlist_snapshot()
     names = _load_stock_names(watchlist["symbol"].tolist())
     snapshot["name"] = snapshot["symbol"].map(names).fillna("--")
     cached_count = int(snapshot["trade_date"].notna().sum())
     avg_change = pd.to_numeric(snapshot["change_pct"], errors="coerce").mean()
+    rising_count = int((snapshot["change_pct"] > 0).sum())
+    falling_count = int((snapshot["change_pct"] < 0).sum())
+    flat_count = int((snapshot["change_pct"] == 0).sum())
     summary_columns = st.columns(3, gap="small")
     with summary_columns[0]:
         st.metric("股票数量", f"{len(watchlist)} 只", border=True)
@@ -94,15 +108,17 @@ else:
         st.markdown(
             f'<div data-testid="stMetric" style="height:100%;box-sizing:border-box;border:1px solid #26364D;'
             f'border-radius:10px;padding:.7rem .9rem;background:#131E2F" class="watchlist-average-card">'
-            f'<div style="color:#AFC0D4">平均涨跌</div><div class="watchlist-average-value" '
-            f'style="color:{avg_color}">{avg_text}</div></div>',
+            f'<div style="color:#AFC0D4">股票池综合涨跌</div><div class="watchlist-average-value" '
+            f'style="color:{avg_color}">{avg_text}</div>'
+            f'<div class="watchlist-change-details">'
+            f'<span class="up">上涨 {rising_count}</span> · '
+            f'<span class="down">下跌 {falling_count}</span> · '
+            f'<span class="flat">平盘 {flat_count}</span></div></div>',
             unsafe_allow_html=True,
         )
-    left, right = st.columns([1, 3])
-    with left:
-        refresh = st.button("批量刷新行情", type="primary")
-    with right:
-        st.caption("批量刷新会依次从公开接口获取每只自选股的日线行情，并写入本地缓存。")
+    st.caption("综合涨跌 = 有行情股票的日涨跌幅算术平均值；无行情股票不参与计算。")
+    refresh = st.button("批量刷新行情", type="primary")
+    st.caption("批量刷新会依次从公开接口获取每只自选股的日线行情，并写入本地缓存。")
     if refresh:
         progress = st.progress(0, text="正在刷新自选股行情...")
         with st.spinner("请稍候..."):

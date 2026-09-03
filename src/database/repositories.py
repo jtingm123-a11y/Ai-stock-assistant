@@ -62,13 +62,21 @@ def get_watchlist_snapshot() -> pd.DataFrame:
 
 
 def get_local_market_overview() -> dict:
-    """Summarize existing cache only; this function never requests external data."""
+    """Summarize cache and the latest available watchlist changes."""
     query = """
-        SELECT COUNT(DISTINCT symbol) AS cached_symbols,
-               MAX(trade_date) AS latest_date,
-               AVG(change_pct) AS average_change
-        FROM daily_quotes AS q
-        WHERE trade_date = (SELECT MAX(trade_date) FROM daily_quotes WHERE symbol = q.symbol)
+        SELECT
+            (SELECT COUNT(DISTINCT symbol) FROM daily_quotes) AS cached_symbols,
+            MAX(q.trade_date) AS latest_date,
+            AVG(q.change_pct) AS average_change,
+            SUM(CASE WHEN q.change_pct > 0 THEN 1 ELSE 0 END) AS rising_count,
+            SUM(CASE WHEN q.change_pct < 0 THEN 1 ELSE 0 END) AS falling_count,
+            SUM(CASE WHEN q.change_pct = 0 THEN 1 ELSE 0 END) AS flat_count
+        FROM watchlist AS w
+        LEFT JOIN daily_quotes AS q
+          ON q.symbol = w.symbol
+         AND q.trade_date = (
+             SELECT MAX(q2.trade_date) FROM daily_quotes AS q2 WHERE q2.symbol = w.symbol
+         )
     """
     with get_connection() as conn:
         row = conn.execute(query).fetchone()
@@ -76,6 +84,9 @@ def get_local_market_overview() -> dict:
         "cached_symbols": int(row["cached_symbols"] or 0),
         "latest_date": row["latest_date"],
         "average_change": row["average_change"],
+        "rising_count": int(row["rising_count"] or 0),
+        "falling_count": int(row["falling_count"] or 0),
+        "flat_count": int(row["flat_count"] or 0),
     }
 
 

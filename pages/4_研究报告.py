@@ -32,13 +32,16 @@ st.markdown(
     '<div class="report-intro">输入股票代码生成结构化研究报告。报告会把基本信息、关键指标、评分依据和风险提示分开整理，便于阅读。</div>',
     unsafe_allow_html=True,
 )
-symbol = st.text_input("A 股代码", value=st.session_state.get("symbol", "600519"), max_chars=6)
+symbol = st.text_input("A 股代码", value=st.session_state.get("symbol", ""), max_chars=6, placeholder="请输入 6 位 A 股代码")
 refresh = st.checkbox("生成前刷新行情", value=True)
 
-if st.button("生成报告", type="primary"):
+retry_requested = st.session_state.pop("report_retry", False)
+if st.button("生成报告", type="primary") or retry_requested:
     try:
         with st.spinner("正在整理数据并生成报告..."):
-            symbol = normalize_symbol(symbol)
+            symbol = normalize_symbol(
+                st.session_state.get("symbol", "") if retry_requested else symbol
+            )
             profile, indicators = get_analysis(symbol, refresh=refresh)
             score, _, _ = get_stock_score(symbol, indicators)
             report = generate_report(symbol, profile, indicators, score)
@@ -51,6 +54,10 @@ if st.button("生成报告", type="primary"):
             st.info("查询新股票必须联网；网络恢复后重新点击“生成报告”即可。")
         else:
             st.error(message)
+        if st.session_state.get("symbol"):
+            if st.button("重试生成报告", key="report_retry_button"):
+                st.session_state["report_retry"] = True
+                st.rerun()
 
 if "report" in st.session_state:
     report = st.session_state["report"]

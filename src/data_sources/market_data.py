@@ -19,8 +19,12 @@ def get_last_source() -> str:
 
 def normalize_symbol(symbol: str) -> str:
     value = str(symbol).strip()
-    if not value.isdigit() or len(value) != 6:
-        raise ValueError("请输入 6 位 A 股代码，例如 600519 或 000001。")
+    if not value:
+        raise ValueError("请输入股票代码后再继续。")
+    if not value.isdigit():
+        raise ValueError("股票代码只能包含数字，请输入 6 位 A 股代码。")
+    if len(value) != 6:
+        raise ValueError("股票代码必须是 6 位数字，例如 600519 或 000001。")
     return value
 
 
