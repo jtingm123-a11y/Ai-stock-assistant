@@ -5,6 +5,7 @@ from plotly.subplots import make_subplots
 
 from src.analysis.scoring import build_research_summary
 from src.analysis.agent_views import build_agent_views
+from src.analysis.research_signals import build_risk_metrics, build_trend_signal, build_volume_signal
 from src.data_sources.market_data import normalize_symbol
 from src.services.scoring_service import get_stock_score
 from src.services.stock_service import get_analysis, get_quote_source
@@ -134,6 +135,36 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
                 f'<div class="metric-value" style="color:{color}">{value}</div></div>',
                 unsafe_allow_html=True,
             )
+
+    trend_signal = build_trend_signal(data)
+    risk_metrics = build_risk_metrics(data)
+    volume_signal = build_volume_signal(data)
+    with st.container(border=True):
+        st.subheader("趋势与量价结论")
+        signal_columns = st.columns(3, gap="small")
+        signal_values = [
+            ("趋势状态", trend_signal["status"], trend_signal["detail"]),
+            ("量价关系", volume_signal["status"], volume_signal["detail"]),
+            ("风险提示", "回撤与波动需关注" if (risk_metrics["drawdown_60d"] or 0) <= -20 else "风险相对可控",
+             f"近 60 日最大回撤 {risk_metrics['drawdown_60d']:.2f}%" if risk_metrics["drawdown_60d"] is not None else "数据不足"),
+        ]
+        for column, (label, value, detail) in zip(signal_columns, signal_values):
+            with column:
+                st.metric(label, value, border=True)
+                st.caption(detail)
+    with st.container(border=True):
+        st.subheader("风险指标")
+        risk_columns = st.columns(4, gap="small")
+        risk_labels = [
+            ("近 20 日涨跌", risk_metrics["return_20d"]),
+            ("近 60 日涨跌", risk_metrics["return_60d"]),
+            ("20 日日波动率", risk_metrics["volatility_20d"]),
+            ("60 日最大回撤", risk_metrics["drawdown_60d"]),
+        ]
+        for column, (label, value) in zip(risk_columns, risk_labels):
+            with column:
+                text = "--" if value is None or pd.isna(value) else f"{value:+.2f}%"
+                st.metric(label, text, border=True)
 
     with st.container(border=True):
         st.subheader("行情 K 线")
