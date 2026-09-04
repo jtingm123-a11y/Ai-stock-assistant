@@ -43,7 +43,7 @@ if st.button("生成报告", type="primary") or retry_requested:
                 st.session_state.get("symbol", "") if retry_requested else symbol
             )
             profile, indicators = get_analysis(symbol, refresh=refresh)
-            score, _, _ = get_stock_score(symbol, indicators)
+            score, _, _ = get_stock_score(symbol, indicators, refresh=refresh)
             report = generate_report(symbol, profile, indicators, score)
         st.session_state["report"] = report
         st.session_state["report_symbol"] = symbol

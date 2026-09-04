@@ -26,11 +26,17 @@ def get_quotes(symbol: str, refresh: bool = False) -> pd.DataFrame:
             quotes = fetch_daily_quotes(symbol)
         except Exception:
             if not cached.empty:
+                from src.data_sources.market_data import set_last_source
+
+                set_last_source("本地缓存（刷新失败）")
                 logger.warning("刷新 %s 失败，继续使用本地缓存数据。", symbol, exc_info=True)
                 return cached
             raise
         save_quotes(symbol, quotes)
         return quotes
+    from src.data_sources.market_data import set_last_source
+
+    set_last_source("本地缓存")
     return cached
 
 

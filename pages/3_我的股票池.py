@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 
+from src.data_sources.market_data import normalize_symbol
 from src.services.watchlist_service import add_watchlist, get_watchlist_snapshot, list_watchlist, refresh_watchlist, remove_watchlist
 from src.data_sources.stock_info import fetch_stock_profile
 
@@ -57,13 +58,18 @@ if submitted:
         st.error(str(exc))
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_stock_name(symbol: str) -> str:
+    return fetch_stock_profile(symbol).get("name", "--")
+
+
 def _load_stock_names(symbols: list[str]) -> dict[str, str]:
     names = st.session_state.setdefault("stock_names", {})
     for code in symbols:
         if code in names and names[code] != "--":
             continue
         try:
-            names[code] = fetch_stock_profile(code).get("name", "--")
+            names[code] = _fetch_stock_name(code)
         except Exception:
             names[code] = "--"
     return names
@@ -82,6 +88,11 @@ def _compact_number(value: object) -> str:
 
 
 watchlist = list_watchlist()
+refresh_message = st.session_state.pop("watchlist_refresh_message", None)
+if refresh_message:
+    st.success(refresh_message["success"])
+    if refresh_message["failed"]:
+        st.warning("以下股票刷新失败：\n\n" + "\n".join(refresh_message["failed"]))
 if not st.session_state.get("watchlist_visible", False):
     st.caption("添加股票后，点击“查看我的自选股”展示行情和管理内容。")
 elif watchlist.empty:
@@ -125,10 +136,13 @@ else:
         with st.spinner("请稍候..."):
             succeeded, failed = refresh_watchlist()
         progress.progress(100, text="刷新完成")
-        if succeeded:
-            st.success(f"已刷新 {len(succeeded)} 只：{'、'.join(succeeded)}")
-        if failed:
-            st.warning("以下股票刷新失败：\n\n" + "\n".join(failed))
+        st.session_state["watchlist_refresh_message"] = {
+            "success": f"已刷新 {len(succeeded)} 只：{'、'.join(succeeded)}"
+            if succeeded
+            else "本次没有股票刷新成功。",
+            "failed": failed,
+        }
+        st.rerun()
 
     snapshot = get_watchlist_snapshot()
     snapshot["name"] = snapshot["symbol"].map(names).fillna("--")
@@ -139,6 +153,15 @@ else:
         snapshot = snapshot.assign(_sort=pd.to_numeric(snapshot["change_pct"], errors="coerce")).sort_values("_sort", na_position="last")
     elif sort_by == "代码":
         snapshot = snapshot.sort_values("symbol")
+    research_symbol = st.selectbox(
+        "选择股票进行研究",
+        snapshot["symbol"].tolist(),
+        format_func=lambda code: f"{code}（{names.get(code, '--')}）",
+    )
+    if st.button("研究所选股票", type="secondary", key="watchlist_research_button"):
+        st.session_state["symbol"] = normalize_symbol(research_symbol)
+        st.session_state["auto_research"] = True
+        st.switch_page("pages/2_个股研究.py")
     display = snapshot.rename(columns={
         "symbol": "代码", "name": "名称", "note": "备注", "trade_date": "行情日期", "close": "收盘价",
         "change_pct": "涨跌幅(%)", "volume": "成交量", "amount": "成交额", "updated_at": "缓存更新于"

@@ -1,8 +1,12 @@
 import pandas as pd
+import logging
 import requests
 import re
 
 from src.data_sources.market_data import normalize_symbol, _market_prefix
+
+
+logger = logging.getLogger(__name__)
 
 
 def fetch_stock_profile(symbol: str) -> dict:
@@ -20,7 +24,8 @@ def fetch_stock_profile(symbol: str) -> dict:
             profile["name"] = str(values.get("股票简称", profile["name"]))
             profile["industry"] = str(values.get("行业", profile["industry"]))
             profile["listing_date"] = str(values.get("上市时间", profile["listing_date"]))
-    except Exception:
+    except Exception as exc:
+        logger.warning("获取 %s 基本信息失败，将尝试备用名称接口：%s", symbol, exc)
         pass
     if profile["name"] == "--":
         profile["name"] = _fetch_fallback_name(symbol)

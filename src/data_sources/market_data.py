@@ -17,6 +17,11 @@ def get_last_source() -> str:
     return _last_source
 
 
+def set_last_source(source: str) -> None:
+    global _last_source
+    _last_source = source
+
+
 def normalize_symbol(symbol: str) -> str:
     value = str(symbol).strip()
     if not value:

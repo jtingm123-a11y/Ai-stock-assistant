@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from datetime import datetime
 
 from src.data_sources.global_markets import fetch_global_market_quotes
 
@@ -27,6 +28,7 @@ if st.session_state.pop("market_global_refresh", False):
         quotes, errors = fetch_global_market_quotes()
     st.session_state["market_global_quotes"] = quotes
     st.session_state["market_global_errors"] = errors
+    st.session_state["market_global_fetched_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 quotes = st.session_state.get("market_global_quotes")
 errors = st.session_state.get("market_global_errors", [])
@@ -61,4 +63,6 @@ else:
     )
 if errors:
     st.caption("部分市场暂时不可用：" + "；".join(errors))
+if st.session_state.get("market_global_fetched_at"):
+    st.caption("最近刷新时间：" + st.session_state["market_global_fetched_at"])
 st.caption("数据来自 Yahoo Finance 公开接口，可能存在延迟，仅供研究参考。")

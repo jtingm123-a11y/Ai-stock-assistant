@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 
 from src.database.connection import get_connection
@@ -29,6 +31,30 @@ def load_quotes(symbol: str) -> pd.DataFrame:
         return pd.read_sql_query(
             "SELECT * FROM daily_quotes WHERE symbol = ? ORDER BY trade_date", conn, params=(symbol,), parse_dates=["trade_date"]
         )
+
+
+def save_financial_cache(symbol: str, data: pd.DataFrame) -> None:
+    payload = data.to_json(orient="split", date_format="iso")
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO financial_cache(symbol, payload, fetched_at)
+               VALUES (?, ?, CURRENT_TIMESTAMP)""",
+            (symbol, payload),
+        )
+
+
+def load_financial_cache(symbol: str) -> tuple[pd.DataFrame | None, str | None]:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT payload, fetched_at FROM financial_cache WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+    if row is None:
+        return None, None
+    try:
+        return pd.read_json(json.dumps(json.loads(row["payload"])), orient="split"), row["fetched_at"]
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None, None
 
 
 def add_watchlist(symbol: str, note: str = "") -> None:

@@ -29,5 +29,11 @@ def initialize_database() -> None:
                 note TEXT DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS financial_cache (
+                symbol TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )

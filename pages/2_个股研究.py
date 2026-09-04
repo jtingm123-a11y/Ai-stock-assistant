@@ -89,7 +89,7 @@ if submitted or retry_requested or auto_research:
             profile, data = get_analysis(
                 symbol, refresh=True if auto_research else refresh
             )
-            score, finance, finance_error = get_stock_score(symbol, data)
+            score, finance, finance_error = get_stock_score(symbol, data, refresh=refresh)
         st.session_state["symbol"] = symbol
         st.session_state["research_payload"] = {
             "symbol": symbol, "profile": profile, "data": data, "score": score,
