@@ -208,7 +208,20 @@ def calculate_stock_score(indicators: pd.DataFrame, financials: pd.DataFrame | N
         "风险指标": score_risk(indicators),
     }
     total = round(sum(section["score"] for section in sections.values()), 1)
-    return {"total": total, "sections": sections}
+    technical_fields = ("close", "ma20", "ma60", "dif", "dea", "macd", "rsi14", "k", "d")
+    available = sum(
+        field in indicators.columns and pd.notna(indicators.iloc[-1].get(field))
+        for field in technical_fields
+    ) if not indicators.empty else 0
+    technical_completeness = available / len(technical_fields) * 100
+    financial_completeness = 0.0 if financials is None or financials.empty else 100.0
+    completeness = round(technical_completeness * 0.6 + financial_completeness * 0.4, 1)
+    confidence = "高" if completeness >= 85 else "中" if completeness >= 55 else "低"
+    return {
+        "total": total, "sections": sections,
+        "data_completeness": completeness, "confidence": confidence,
+        "missing_financial_data": financial_completeness == 0,
+    }
 
 
 def build_research_summary(score: dict) -> str:

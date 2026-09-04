@@ -5,7 +5,15 @@ from plotly.subplots import make_subplots
 
 from src.analysis.scoring import build_research_summary
 from src.analysis.agent_views import build_agent_views
-from src.analysis.research_signals import build_risk_metrics, build_trend_signal, build_volume_signal
+from src.analysis.research_signals import (
+    build_risk_metrics, build_support_resistance, build_trend_signal, build_volume_signal,
+)
+from src.analysis.rule_engine import build_technical_signals
+from src.analysis.alerts import build_research_alerts
+from src.database.repositories import (
+    list_research_alerts, load_score_history, load_signal_history, save_research_alerts,
+    save_score_history, save_signal_history,
+)
 from src.data_sources.market_data import normalize_symbol
 from src.services.scoring_service import get_stock_score
 from src.services.stock_service import get_analysis, get_quote_source
@@ -91,6 +99,9 @@ if submitted or retry_requested or auto_research:
                 symbol, refresh=True if auto_research else refresh
             )
             score, finance, finance_error = get_stock_score(symbol, data, refresh=refresh)
+            save_score_history(symbol, data.iloc[-1]["trade_date"], score)
+            save_signal_history(symbol, data.iloc[-1]["trade_date"], build_technical_signals(data))
+            save_research_alerts(build_research_alerts(symbol, data))
         st.session_state["symbol"] = symbol
         st.session_state["research_payload"] = {
             "symbol": symbol, "profile": profile, "data": data, "score": score,
@@ -139,6 +150,76 @@ if payload and payload["symbol"] == st.session_state.get("symbol"):
     trend_signal = build_trend_signal(data)
     risk_metrics = build_risk_metrics(data)
     volume_signal = build_volume_signal(data)
+    levels = build_support_resistance(data)
+    technical_signals = build_technical_signals(data)
+    history = load_score_history(payload["symbol"])
+    signal_history = load_signal_history(payload["symbol"])
+    alerts = list_research_alerts(payload["symbol"], limit=30)
+    with st.container(border=True):
+        st.subheader("研究提醒")
+        if alerts.empty:
+            st.success("当前没有新的本地研究提醒。")
+        else:
+            alert_display = alerts.rename(columns={
+                "trade_date": "日期", "category": "类型", "level": "级别", "message": "提醒内容",
+            })
+            st.dataframe(alert_display[["日期", "类型", "级别", "提醒内容"]],
+                         hide_index=True, use_container_width=True)
+    with st.container(border=True):
+        st.subheader("支撑位与压力位")
+        level_columns = st.columns(4, gap="small")
+        level_values = [
+            ("20 日支撑", levels["support_20"]),
+            ("20 日压力", levels["resistance_20"]),
+            ("60 日支撑", levels["support_60"]),
+            ("60 日压力", levels["resistance_60"]),
+        ]
+        for column, (label, value) in zip(level_columns, level_values):
+            with column:
+                st.metric(label, "--" if value is None else f"{value:.2f}", border=True)
+        if levels["distance_support"] is not None and levels["distance_resistance"] is not None:
+            st.caption(
+                f"当前价格距 20 日支撑 {levels['distance_support']:.2f}%，"
+                f"距 20 日压力约 {levels['distance_resistance']:.2f}%。"
+            )
+    with st.container(border=True):
+        st.subheader("评分可信度")
+        confidence_cols = st.columns(3, gap="small")
+        confidence_cols[0].metric("数据完整度", f"{score['data_completeness']:.1f}%", border=True)
+        confidence_cols[1].metric("评分可信度", score["confidence"], border=True)
+        confidence_cols[2].metric("技术信号", f"{len(technical_signals)} 条", border=True)
+        if score["missing_financial_data"]:
+            st.warning("财务数据缺失，当前总分的可信度受到影响。")
+        st.bar_chart(pd.DataFrame(
+            {"得分": {name: section["score"] for name, section in score["sections"].items()}},
+        ))
+        if not history.empty:
+            history = history.sort_values(["trade_date", "created_at"])
+            latest = history.iloc[-1]
+            previous = history.iloc[-2] if len(history) > 1 else None
+            delta = None if previous is None else latest["total"] - previous["total"]
+            st.metric("相比上次评分", "--" if delta is None else f"{delta:+.1f} 分", border=True)
+            chart_history = history.rename(columns={
+                "trade_date": "行情日期", "total": "综合评分", "technical": "技术面",
+                "financial": "财务面", "trend": "趋势强度", "risk": "风险指标",
+            }).set_index("行情日期")[["综合评分", "技术面", "财务面", "趋势强度", "风险指标"]]
+            st.line_chart(chart_history)
+            st.caption("最近评分记录")
+            st.dataframe(history[["trade_date", "total", "confidence"]].rename(
+                columns={"trade_date": "行情日期", "total": "总分", "confidence": "可信度"}
+            ), hide_index=True, use_container_width=True)
+    with st.container(border=True):
+        st.subheader("技术信号")
+        if technical_signals:
+            st.dataframe(pd.DataFrame(technical_signals), hide_index=True, use_container_width=True)
+        else:
+            st.info("暂无可识别的技术信号。")
+        if not signal_history.empty:
+            st.subheader("历史信号记录")
+            st.dataframe(signal_history.rename(columns={
+                "trade_date": "行情日期", "category": "类型", "result": "信号",
+                "detail": "说明", "created_at": "记录时间",
+            }), hide_index=True, use_container_width=True)
     with st.container(border=True):
         st.subheader("趋势与量价结论")
         signal_columns = st.columns(3, gap="small")

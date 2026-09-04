@@ -4,6 +4,9 @@ import pandas as pd
 
 from src.analysis.rule_engine import build_technical_signals
 from src.analysis.agent_views import build_agent_views
+from src.analysis.research_signals import (
+    build_risk_metrics, build_support_resistance, build_trend_signal, build_volume_signal,
+)
 from src.utils.formatters import format_number
 
 
@@ -21,6 +24,10 @@ def generate_report(symbol: str, profile: dict, indicators: pd.DataFrame, score:
     last = indicators.iloc[-1]
     trade_date = pd.to_datetime(last["trade_date"]).strftime("%Y-%m-%d")
     signals = build_technical_signals(indicators)
+    trend_signal = build_trend_signal(indicators)
+    risk_metrics = build_risk_metrics(indicators)
+    volume_signal = build_volume_signal(indicators)
+    levels = build_support_resistance(indicators)
     agent_views = build_agent_views(indicators, score or {"total": 0, "sections": {
         "技术面": {"score": 0}, "财务面": {"score": 0},
         "趋势强度": {"score": 0}, "风险指标": {"score": 0},
@@ -44,6 +51,21 @@ def generate_report(symbol: str, profile: dict, indicators: pd.DataFrame, score:
 {chr(10).join(score_rows)}
 
 """
+    signal_summary = f"""## 四、趋势与风险结论
+
+- 趋势状态：{trend_signal['status']}；{trend_signal['detail']}
+- 量价关系：{volume_signal['status']}；{volume_signal['detail']}
+- 近 20 日涨跌：{format_number(risk_metrics['return_20d'])}%
+- 近 60 日涨跌：{format_number(risk_metrics['return_60d'])}%
+- 20 日日波动率：{format_number(risk_metrics['volatility_20d'])}%
+- 60 日最大回撤：{format_number(risk_metrics['drawdown_60d'])}%
+- 20 日支撑 / 压力：{format_number(levels['support_20'])} / {format_number(levels['resistance_20'])}
+- 60 日支撑 / 压力：{format_number(levels['support_60'])} / {format_number(levels['resistance_60'])}
+
+"""
+    confidence_text = ""
+    if score:
+        confidence_text = f"数据完整度：{score.get('data_completeness', 0):.1f}%；评分可信度：{score.get('confidence', '低')}。\n\n"
     return f"""# {profile.get('name', '--')}（{symbol}）研究报告
 
 > 报告生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}  
@@ -69,15 +91,15 @@ def generate_report(symbol: str, profile: dict, indicators: pd.DataFrame, score:
 | MACD（DIF / DEA / 柱） | {format_number(last.get('dif'))} / {format_number(last.get('dea'))} / {format_number(last.get('macd'))} | 判断趋势动能，柱值为正通常表示动能偏强 |
 | RSI(14) | {format_number(last.get('rsi14'))} | 观察短期强弱，数值越高代表近期越强 |
 
-{score_text}## 四、多角色研究视角
+{confidence_text}{score_text}{signal_summary}## 五、多角色研究视角
 
 {agent_lines}
 
-## 五、规则化研判
+## 六、规则化研判
 
 {signal_lines}
 
-## 六、风险提示
+## 七、风险提示
 
 本报告为程序依据公开历史数据和固定规则自动生成，仅用于个人研究与学习，不构成任何投资建议。技术指标具有滞后性；请结合公司公告、财务数据、估值、市场环境及自身风险承受能力独立判断。
 """

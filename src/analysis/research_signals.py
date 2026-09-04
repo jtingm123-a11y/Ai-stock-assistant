@@ -71,3 +71,31 @@ def build_volume_signal(data: pd.DataFrame) -> dict:
         status = "量价平稳"
     detail = "--" if ratio is None else f"今日成交量为近 5 日均量的 {ratio:.2f} 倍。"
     return {"status": status, "detail": detail}
+
+
+def build_support_resistance(data: pd.DataFrame) -> dict:
+    """Estimate recent support and resistance from rolling price extremes."""
+    frame = data.sort_values("trade_date")
+    close = _series(frame, "close").dropna()
+    high = _series(frame, "high").dropna()
+    low = _series(frame, "low").dropna()
+    if high.empty:
+        high = close
+    if low.empty:
+        low = close
+    if close.empty or high.empty or low.empty:
+        return {"close": None, "support_20": None, "resistance_20": None,
+                "support_60": None, "resistance_60": None,
+                "distance_support": None, "distance_resistance": None}
+    latest = float(close.iloc[-1])
+    support_20, resistance_20 = float(low.tail(20).min()), float(high.tail(20).max())
+    support_60, resistance_60 = float(low.tail(60).min()), float(high.tail(60).max())
+    return {
+        "close": latest,
+        "support_20": support_20,
+        "resistance_20": resistance_20,
+        "support_60": support_60,
+        "resistance_60": resistance_60,
+        "distance_support": (latest / support_20 - 1) * 100 if support_20 else None,
+        "distance_resistance": (resistance_20 / latest - 1) * 100 if latest else None,
+    }

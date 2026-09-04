@@ -1,6 +1,8 @@
 import pandas as pd
 
-from src.analysis.research_signals import build_risk_metrics, build_trend_signal, build_volume_signal
+from src.analysis.research_signals import (
+    build_risk_metrics, build_support_resistance, build_trend_signal, build_volume_signal,
+)
 
 
 def _data(periods=80):
@@ -28,3 +30,9 @@ def test_risk_metrics_are_percentage_values():
 
 def test_volume_signal_detects_rising_volume():
     assert build_volume_signal(_data())["status"] == "上涨放量"
+
+
+def test_support_and_resistance_use_recent_extremes():
+    result = build_support_resistance(_data())
+    assert result["support_20"] < result["resistance_20"]
+    assert result["distance_support"] > 0

@@ -1,11 +1,15 @@
 from textwrap import dedent
 
+import pandas as pd
 import streamlit as st
 
 from src.data_sources.market_data import normalize_symbol
 from src.database.repositories import get_local_market_overview
 from src.database.schema import initialize_database
 from src.services.watchlist_service import list_watchlist
+from src.analysis.alerts import build_research_alerts
+from src.services.stock_service import get_quotes
+from src.analysis.technical_indicators import add_technical_indicators
 
 
 initialize_database()
@@ -68,6 +72,13 @@ if submitted:
 
 overview = get_local_market_overview()
 watchlist = list_watchlist()
+alert_rows = []
+for cached_symbol in watchlist["symbol"].tolist():
+    try:
+        cached_quotes = get_quotes(cached_symbol, refresh=False)
+        alert_rows.extend(build_research_alerts(cached_symbol, add_technical_indicators(cached_quotes)))
+    except (ValueError, RuntimeError, KeyError):
+        continue
 latest_date = overview.get("latest_date") or "尚未缓存"
 average_change = overview.get("average_change")
 average_change_text = "--" if average_change is None else f"{average_change:+.2f}%"
@@ -95,3 +106,14 @@ for column, (label, value, value_class) in zip(st.columns(3, gap="small"), overv
             unsafe_allow_html=True,
         )
 st.caption("综合涨跌 = 股票池中有行情股票的日涨跌幅算术平均值；无行情股票不参与计算。")
+st.subheader("本地研究提醒")
+if alert_rows:
+    alert_frame = pd.DataFrame(alert_rows)
+    st.metric("提醒数量", f"{len(alert_frame)} 条", border=True)
+    st.dataframe(
+        alert_frame.rename(columns={"symbol": "代码", "trade_date": "日期", "category": "类型",
+                                    "level": "级别", "message": "提醒内容"}),
+        hide_index=True, use_container_width=True,
+    )
+else:
+    st.success("当前股票池没有新的本地研究提醒。")

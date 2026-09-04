@@ -52,9 +52,116 @@ def load_financial_cache(symbol: str) -> tuple[pd.DataFrame | None, str | None]:
     if row is None:
         return None, None
     try:
-        return pd.read_json(json.dumps(json.loads(row["payload"])), orient="split"), row["fetched_at"]
+        return pd.read_json(row["payload"], orient="split"), row["fetched_at"]
     except (ValueError, TypeError, json.JSONDecodeError):
         return None, None
+
+
+def save_score_history(symbol: str, trade_date: object, score: dict) -> None:
+    sections = score["sections"]
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO score_history
+               (symbol, trade_date, total, technical, financial, trend, risk, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, str(trade_date)[:10], score["total"],
+             sections["技术面"]["score"], sections["财务面"]["score"],
+             sections["趋势强度"]["score"], sections["风险指标"]["score"],
+             score.get("confidence", "低")),
+        )
+
+
+def load_score_history(symbol: str, limit: int = 10) -> pd.DataFrame:
+    with get_connection() as conn:
+        return pd.read_sql_query(
+            "SELECT * FROM score_history WHERE symbol = ? ORDER BY created_at DESC LIMIT ?",
+            conn, params=(symbol, limit),
+        )
+
+
+def save_signal_history(symbol: str, trade_date: object, signals: list[dict]) -> None:
+    if not signals:
+        return
+    with get_connection() as conn:
+        conn.executemany(
+            """INSERT INTO technical_signal_history
+               (symbol, trade_date, category, result, detail)
+               VALUES (?, ?, ?, ?, ?)""",
+            [
+                (symbol, str(trade_date)[:10], item["category"], item["result"], item.get("detail", ""))
+                for item in signals
+            ],
+        )
+
+
+def load_signal_history(symbol: str, limit: int = 50) -> pd.DataFrame:
+    with get_connection() as conn:
+        return pd.read_sql_query(
+            """SELECT trade_date, category, result, detail, created_at
+               FROM technical_signal_history
+               WHERE symbol = ? ORDER BY trade_date DESC, created_at DESC LIMIT ?""",
+            conn, params=(symbol, limit),
+        )
+
+
+def save_research_report(
+    symbol: str, name: str, trade_date: object, score: dict, report: str
+) -> int:
+    with get_connection() as conn:
+        cursor = conn.execute(
+            """INSERT INTO research_reports
+               (symbol, name, trade_date, total_score, confidence, report)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (symbol, name, str(trade_date)[:10], score.get("total"),
+             score.get("confidence", "低"), report),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_research_reports(symbol: str | None = None, limit: int = 50) -> pd.DataFrame:
+    query = """SELECT id, symbol, name, trade_date, total_score, confidence, created_at
+               FROM research_reports"""
+    params: tuple[object, ...] = ()
+    if symbol:
+        query += " WHERE symbol = ?"
+        params = (symbol,)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params += (limit,)
+    with get_connection() as conn:
+        return pd.read_sql_query(query, conn, params=params)
+
+
+def get_research_report(report_id: int) -> dict | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM research_reports WHERE id = ?", (report_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def save_research_alerts(alerts: list[dict]) -> None:
+    if not alerts:
+        return
+    with get_connection() as conn:
+        conn.executemany(
+            """INSERT INTO research_alerts
+               (symbol, trade_date, category, level, message)
+               VALUES (?, ?, ?, ?, ?)""",
+            [(item["symbol"], item["trade_date"], item["category"], item["level"], item["message"])
+             for item in alerts],
+        )
+
+
+def list_research_alerts(symbol: str | None = None, limit: int = 100) -> pd.DataFrame:
+    query = "SELECT * FROM research_alerts"
+    params: tuple[object, ...] = ()
+    if symbol:
+        query += " WHERE symbol = ?"
+        params = (symbol,)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params += (limit,)
+    with get_connection() as conn:
+        return pd.read_sql_query(query, conn, params=params)
 
 
 def add_watchlist(symbol: str, note: str = "") -> None:

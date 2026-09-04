@@ -35,5 +35,50 @@ def initialize_database() -> None:
                 payload TEXT NOT NULL,
                 fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS score_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                trade_date TEXT,
+                total REAL NOT NULL,
+                technical REAL NOT NULL,
+                financial REAL NOT NULL,
+                trend REAL NOT NULL,
+                risk REAL NOT NULL,
+                confidence TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS technical_signal_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                trade_date TEXT,
+                category TEXT NOT NULL,
+                result TEXT NOT NULL,
+                detail TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS research_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                name TEXT,
+                trade_date TEXT,
+                total_score REAL,
+                confidence TEXT,
+                report TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS research_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                trade_date TEXT,
+                category TEXT NOT NULL,
+                level TEXT NOT NULL,
+                message TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
